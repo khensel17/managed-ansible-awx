@@ -1,0 +1,35 @@
+---
+- name: Configure Playbooks on Ansible AWX
+  hosts: awx
+  environment:
+    CONTROLLER_HOST: "{{ awx_config.controller_host }}"
+    CONTROLLER_USERNAME: "oauth2"
+    CONTROLLER_OAUTH_TOKEN: "{{ awx_config.controller_oauth_token }}"
+    CONTROLLER_VERIFY_SSL: "false"
+  tasks:
+    - name: Start playbook
+      ansible.builtin.debug:
+        msg: "This playbook will update the Playbooks on Ansible AWX"
+        verbosity: 0
+
+    - name: Create tower_cli.cfg as workaround for awx_config.controller_api lookup
+      ansible.builtin.copy:
+        content: |
+          host={{ awx_config.controller_host }}
+          username=oauth2
+          oauth_token={{ awx_config.controller_oauth_token }}
+          verify_ssl=false
+        dest: ../tower_cli.cfg
+        mode: "0666"
+      changed_when: false
+
+    - name: "Update Project"
+      awx.awx.project_update:
+        project: "{{ project_name }}"
+        timeout: 60
+
+    - name: Cleanup tower_cli.cfg
+      ansible.builtin.file:
+        path: ../tower_cli.cfg
+        state: absent
+      changed_when: false

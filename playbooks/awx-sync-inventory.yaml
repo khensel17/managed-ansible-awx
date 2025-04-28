@@ -1,0 +1,63 @@
+---
+- name: Configure Inventories on Ansible AWX
+  hosts: awx
+  environment:
+    CONTROLLER_HOST: "{{ awx_config.controller_host }}"
+    CONTROLLER_USERNAME: "oauth2"
+    CONTROLLER_OAUTH_TOKEN: "{{ awx_config.controller_oauth_token }}"
+    CONTROLLER_VERIFY_SSL: "false"
+  tasks:
+    - name: Start playbook
+      ansible.builtin.debug:
+        msg: "This playbook will update the Inventories on Ansible AWX"
+        verbosity: 0
+
+    - name: Create tower_cli.cfg as workaround for awx_config.controller_api lookup
+      ansible.builtin.copy:
+        content: |
+          host={{ awx_config.controller_host }}
+          username=oauth2
+          oauth_token={{ awx_config.controller_oauth_token }}
+          verify_ssl=false
+        dest: ../tower_cli.cfg
+        mode: "0666"
+      changed_when: false
+
+    - name: "Update Project"
+      awx.awx.project_update:
+        project: "{{ project_name }}"
+        timeout: 10
+
+    - name: Get Inventory IDs
+      ansible.builtin.set_fact:
+        inventory_id: "{{ query('awx.awx.controller_api', 'inventories', query_params={'name': item.name}, return_ids=True) }}"
+      register: inventory_ids
+      loop: "{{ inventories }}"
+
+    - name: Get Inventory Source IDs
+      ansible.builtin.set_fact:
+        inventory_source_ids: >-
+          {% set update_inventories = [] %}
+          {% for inventory in inventory_ids.results %}
+            {% set parameters = {'inventory': inventory.ansible_facts.inventory_id[0]} %}
+            {% set sources = query('awx.awx.controller_api', 'inventory_sources', query_params=parameters, return_ids=True) %}
+            {% set _ = update_inventories.append({'name': inventory.item.name, 'sources': sources}) %}
+          {% endfor %}
+          {{ update_inventories }}
+
+    - name: Debug inventory_source_ids
+      ansible.builtin.debug:
+        msg: "{{ inventory_source_ids | from_yaml }}"
+        verbosity: 2
+
+    - name: Update all inventory sources
+      awx.awx.inventory_source_update:
+        name: "{{ item.1 }}"
+        inventory: "{{ item.0.name }}"
+      loop: "{{ (inventory_source_ids | from_yaml) | subelements('sources') }}"
+
+    - name: Cleanup tower_cli.cfg
+      ansible.builtin.file:
+        path: ../tower_cli.cfg
+        state: absent
+      changed_when: false

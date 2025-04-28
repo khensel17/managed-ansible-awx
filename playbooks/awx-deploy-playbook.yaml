@@ -1,0 +1,202 @@
+---
+- name: Configure Playbooks on Ansible AWX
+  hosts: awx
+  environment:
+    CONTROLLER_HOST: "{{ awx_config.controller_host }}"
+    CONTROLLER_USERNAME: "oauth2"
+    CONTROLLER_OAUTH_TOKEN: "{{ awx_config.controller_oauth_token }}"
+    CONTROLLER_VERIFY_SSL: "false"
+  tasks:
+    - name: Start playbook
+      ansible.builtin.debug:
+        msg: "This playbook will deploy Playbooks on Ansible AWX"
+        verbosity: 0
+
+    - name: Show ansible facts
+      ansible.builtin.debug:
+        var: ansible_facts
+        verbosity: 2
+
+    - name: Create tower_cli.cfg as workaround for awx_config.controller_api lookup
+      ansible.builtin.copy:
+        content: |
+          host={{ awx_config.controller_host }}
+          username=oauth2
+          oauth_token={{ awx_config.controller_oauth_token }}
+          verify_ssl=false
+        dest: ../tower_cli.cfg
+        mode: "0666"
+      changed_when: false
+
+    - name: "AWX: Ensure SCM credential exists"
+      ansible.builtin.set_fact:
+        awx_scm_credential: >-
+          {{ lookup('awx.awx.controller_api', 'credentials', query_params={"name": (project_scm_credential | default('git-read-credential'))}) }}
+      failed_when: awx_scm_credential | length == 0
+
+    - name: Create Project
+      awx.awx.project:
+        name: "{{ project_name }}"
+        description: "{{ project_description }}"
+        organization: "{{ project_organization_name }}"
+        scm_type: "git"
+        scm_url: "{{ project_scm_url }}"
+        scm_branch: " {{ project_scm_branch }}"
+        credential: "{{ project_scm_credential | default('git-read-credential') }}"
+        update_project: true
+        timeout: 60
+        state: present
+      register: project_result
+
+    - name: "Update Project"
+      awx.awx.project_update:
+        project: "{{ project_name }}"
+        timeout: 60
+      when: not project_result.changed
+
+    - name: Create Job Template
+      awx.awx.job_template:
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        job_type: "{{ item.job_type }}"
+        project: "{{ project_name }}"
+        playbook: "{{ item.playbook }}"
+        inventory: "{{ item.inventory }}"
+        credentials: "{{ item.credentials | default(omit) }}"
+        extra_vars: "{{ item.extra_vars | default(omit) }}"
+        state: present
+        forks: "{{ item.forks | default(5) }}"
+        limit: "{{ item.limit | default(omit) }}"
+        verbosity: "{{ item.verbosity | default(0) }}"
+        job_slice_count: "{{ item.job_slicing | default(1) }}"
+        timeout: "{{ item.timeout | default(0) }}"
+        diff_mode: "{{ item.diff_mode | default(false) }}"
+        become_enabled: "{{ item.become_enabled | default(false) }}"
+        allow_simultaneous: "{{ item.allow_simultaneous | default(false) }}"
+        ask_credential_on_launch: "{{ item.ask_credential_on_launch | default(false) }}"
+        ask_diff_mode_on_launch: "{{ item.ask_diff_mode_on_launch | default(false) }}"
+        ask_execution_environment_on_launch: "{{ item.ask_execution_environment_on_launch | default(false) }}"
+        ask_forks_on_launch: "{{ item.ask_forks_on_launch | default(false) }}"
+        ask_instance_groups_on_launch: "{{ item.ask_instance_groups_on_launch | default(false) }}"
+        ask_inventory_on_launch: "{{ item.ask_inventory_on_launch | default(false) }}"
+        ask_job_slice_count_on_launch: "{{ item.ask_job_slice_count_on_launch | default(false) }}"
+        ask_job_type_on_launch: "{{ item.ask_job_type_on_launch | default(false) }}"
+        ask_labels_on_launch: "{{ item.ask_labels_on_launch | default(false) }}"
+        ask_limit_on_launch: "{{ item.ask_limit_on_launch | default(false) }}"
+        ask_scm_branch_on_launch: "{{ item.ask_scm_branch_on_launch | default(false) }}"
+        ask_skip_tags_on_launch: "{{ item.ask_skip_tags_on_launch | default(false) }}"
+        ask_tags_on_launch: "{{ item.ask_tags_on_launch | default(false) }}"
+        ask_timeout_on_launch: "{{ item.ask_timeout_on_launch | default(false) }}"
+        ask_variables_on_launch: "{{ item.ask_variables_on_launch | default(false) }}"
+        ask_verbosity_on_launch: "{{ item.ask_verbosity_on_launch | default(false) }}"
+        survey_enabled: "{{ true if (item.survey is defined) and (item.survey | length > 0) else false }}"
+        survey_spec: "{{ {'name': '', 'description': '', 'spec': item.survey} if (item.survey is defined) and (item.survey | length > 0) else {} }}"
+      loop: "{{ job_templates }}"
+
+    - name: Build rrule params
+      ansible.builtin.set_fact:
+        rruleset_params: >-
+          {{
+            query(
+              'awx.awx.schedule_rruleset',
+              item.1.start_time,
+              rules=rrules,
+              timezone=(item.1.timezone | default('Europe/Amsterdam'))
+            )
+          }}
+      vars:
+        rrules: "{{ item.1.rules }}"
+      loop: "{{ (job_templates | selectattr('schedules', 'defined') | subelements('schedules')) }}"
+      when: item.0.schedules is defined and item.1.rules | length > 0 and item.1.start_time is defined
+      register: rruleset_params_result
+
+    - name: Debug rrule
+      ansible.builtin.debug:
+        var: rruleset_params_result
+        verbosity: 2
+
+    - name: Create Schedules
+      awx.awx.schedule:
+        name: "{{ item.1.name }}"
+        description: "{{ item.1.description }}"
+        enabled: "{{ item.1.enabled }}"
+        state: present
+        unified_job_template: "{{ item.0.name }}"
+        extra_data: "{{ item.1.extra_data | default({}) }}"
+        rrule: >-
+          {{ (
+            rruleset_params_result.results |
+              selectattr('item.1.name', 'equalto', item.1.name) |
+              flatten |
+              map(attribute='ansible_facts.rruleset_params')
+            )[0]
+          }}
+        request_timeout: 30.0
+      loop: "{{ (job_templates | selectattr('schedules', 'defined') | subelements('schedules')) }}"
+      when: item.0.schedules is defined
+
+    - name: "AWX: Determine schedules to delete based on configuration"
+      ansible.builtin.set_fact:
+        schedules_to_delete: >-
+          {%- set delete_items = [] -%}
+          {%- set existing_items = lookup('awx.awx.controller_api', 'schedules', query_params={"unified_job_template__name": item.name}, return_all=true) -%}
+          {%- if item.schedules is defined -%}
+            {%- for schedule in (existing_items | selectattr('name', 'defined') | map(attribute='name')) -%}
+              {%- if schedule not in (item.schedules | map(attribute='name')) -%}
+                {%- set _ = delete_items.append({'job_template': item.name, 'schedule_name': schedule}) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {{ delete_items }}
+      loop: "{{ job_templates }}"
+      register: schedules_to_delete_results
+
+    - name: "AWX DEBUG: existing schedules"
+      ansible.builtin.debug:
+        msg: "{{ item }}"
+        verbosity: 2
+      loop: "{{ schedules_to_delete_results.results | map(attribute='ansible_facts.schedules_to_delete') | flatten }}"
+      when: schedules_to_delete_results.results | map(attribute='ansible_facts.schedules_to_delete') | flatten | length > 0
+
+    - name: "AWX: Delete schedules that are not defined"
+      awx.awx.schedule:
+        name: "{{ item.schedule_name }}"
+        unified_job_template: "{{ item.job_template }}"
+        state: absent
+      loop: "{{ schedules_to_delete_results.results | map(attribute='ansible_facts.schedules_to_delete') | flatten }}"
+      when: schedules_to_delete_results.results | map(attribute='ansible_facts.schedules_to_delete') | flatten | length > 0
+
+    - name: "AWX: Get existing job templates for Project"
+      ansible.builtin.set_fact:
+        awx_existing_job_templates: >-
+          {{ lookup('awx.awx.controller_api', 'job_templates', query_params={"project__name": project_name}, return_all=true) }}
+
+    - name: "AWX: Debug existing job templates"
+      ansible.builtin.debug:
+        var: awx_existing_job_templates
+        verbosity: 2
+
+    - name: Debug diff
+      ansible.builtin.debug:
+        msg: "{{ item }}"
+      loop: "{{ (awx_existing_job_templates | map(attribute='name')) | difference(job_templates | map(attribute='name') | list) }}"
+      when: >-
+        awx_existing_job_templates | length > 0 and
+        (awx_existing_job_templates | selectattr('name', 'defined') | map(attribute='name'))
+        | difference(job_templates | map(attribute='name') | list) | length > 0
+
+    - name: "AWX: Delete job templates that are not in the playbook"
+      awx.awx.job_template:
+        name: "{{ item }}"
+        state: absent
+      loop: "{{ (awx_existing_job_templates | map(attribute='name')) | difference(job_templates | map(attribute='name') | list) }}"
+      when: >-
+        awx_existing_job_templates | length > 0 and
+        (awx_existing_job_templates | selectattr('name', 'defined') | map(attribute='name'))
+        | difference(job_templates | map(attribute='name') | list) | length > 0
+
+    - name: Cleanup tower_cli.cfg
+      ansible.builtin.file:
+        path: ../tower_cli.cfg
+        state: absent
+      changed_when: false

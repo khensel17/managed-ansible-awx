@@ -1,0 +1,36 @@
+---
+- name: "AWX CONFIGURE TASKS ORGANIZATION: Get current organizations"
+  ansible.builtin.set_fact:
+    current_awx_organizations: "{{ lookup('awx.awx.controller_api', 'organizations') }}"
+
+# - name: "AWX CONFIGURE TASKS ORGANIZATION: Differences in configurations"
+#   ansible.builtin.set_fact:
+#     diff_awx_organizations: >-
+#       {% if current_awx_organizations | type_debug == "dict" %}
+#         {{ [current_awx_organizations.name] }}
+#       {% else %}
+#         {{ (current_awx_organizations | map(attribute='name') | list) | difference((awx_config.organizations | map(attribute='name') | list)) }}
+#       {% endif %}
+
+- name: "AWX CONFIGURE TASKS ORGANIZATION: Configure Organizations"
+  awx.awx.organization:
+    name: "{{ item.name }}"
+    description: "{{ item.description }}"
+    instance_groups: "{{ item.instance_groups | default(omit) }}"
+    default_environment: "{{ item.execution_environment | default(omit) }}"
+    galaxy_credentials: "{{ item.galaxy_credentials | default(omit) }}"
+    state: present
+  loop: "{{ awx_config.organizations }}"
+
+
+# - name: "AWX CONFIGURE TASKS ORGANIZATION: Debug diff_awx_organizations"
+#   ansible.builtin.debug:
+#     var: diff_awx_organizations
+#     verbosity: 2
+
+# - name: "AWX CONFIGURE TASKS ORGANIZATION: Cleanup Organizations"
+#   awx.awx.organization:
+#     name: "{{ item }}"
+#     state: absent
+#   loop: "{{ diff_awx_organizations | from_yaml }}"
+#   when: diff_awx_organizations | length > 0

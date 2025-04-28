@@ -1,0 +1,51 @@
+---
+# - name: "AWX CONFIGURE TASKS EXECUTION ENVIRONMENTS: Get current execution environments"
+#   ansible.builtin.set_fact:
+#     current_awx_execution_environments: "{{ lookup('awx.awx.controller_api', 'execution_environments') }}"
+
+# - name: "AWX CONFIGURE TASKS EXECUTION ENVIRONMENTS: Filter default execution environments"
+#   ansible.builtin.set_fact:
+#     filtered_axw_execution_environments: >-
+#       {% set default_execution_environments = ['Control Plane Execution Environment', 'AWX EE (latest)', 'AWX EE (24.6.1)'] %}
+#       {% set filtered_execution_environments = [] %}
+#       {% for execution_environment in current_awx_execution_environments %}
+#         {% if execution_environment.name not in default_execution_environments %}
+#           {% set _ = filtered_execution_environments.append(execution_environment) %}
+#         {% endif %}
+#       {% endfor %}
+#       {{ filtered_execution_environments }}
+
+# - name: "AWX CONFIGURE TASKS EXECUTION ENVIRONMENTS: Debug"
+#   ansible.builtin.debug:
+#     msg: "{{ filtered_axw_execution_environments | from_yaml }}"
+#     verbosity: 2
+
+# - name: "AWX CONFIGURE TASKS EXECUTION ENVIRONMENTS: Determine execution environments to delete"
+#   ansible.builtin.set_fact:
+#     awx_execution_environments_to_delete: >-
+#       {{
+#         ((filtered_axw_execution_environments | from_yaml) |
+#           map(attribute='name') | list) |
+#         difference(
+#           (awx_config.extra_execution_environments | map(attribute='name') | list)
+#         )
+#       }}
+
+- name: "AWX CONFIGURE TASKS EXECUTION ENVIRONMENTS: Configure execution environments"
+  awx.awx.execution_environment:
+    name: "{{ item.name }}"
+    description: "{{ item.description }}"
+    image: "{{ item.image }}"
+    credential: "{{ item.credential | default(omit) }}"
+    organization: "{{ item.organization | default(omit) }}"
+    pull: "{{ item.pull | default('missing') }}"
+    state: present
+  loop: "{{ awx_config.extra_execution_environments }}"
+  when: awx_config.extra_execution_environments | length > 0
+
+# - name: "AWX CONFIGURE TASKS EXECUTION ENVIRONMENTS: Delete execution environments"
+#   awx.awx.execution_environment:
+#     name: "{{ item }}"
+#     state: absent
+#   loop: "{{ awx_execution_environments_to_delete }}"
+#   when: awx_execution_environments_to_delete | length > 0

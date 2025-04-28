@@ -1,0 +1,59 @@
+---
+- name: "AWX CONFIGURE TASKS TEAMS: Get current organizations"
+  ansible.builtin.set_fact:
+    current_awx_organizations: "{{ lookup('awx.awx.controller_api', 'organizations') }}"
+
+- name: "AWX CONFIGURE TASKS TEAMS: Get current teams"
+  ansible.builtin.set_fact:
+    current_awx_teams: "{{ lookup('awx.awx.controller_api', 'teams') }}"
+  register: current_teams_results
+
+- name: "AWX CONFIGURE TASKS TEAMS: Set axw_teams_to_keep"
+  ansible.builtin.set_fact:
+    awx_teams_to_keep: >-
+      {%- set keep = [] -%}
+      {%- for team in current_awx_teams -%}
+        {%- set team_name = team.name -%}
+        {%- set org_name = team.summary_fields.organization.name -%}
+        {%- for org in awx_config.organizations -%}
+          {%- if org.name == org_name and 'teams' in org -%}
+            {%- if team_name in org.teams | map(attribute='name') | list -%}
+              {%- set _ = keep.append(team_name ~ '@' ~ org_name) -%}
+            {%- endif -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ keep }}
+
+- name: "AWX CONFIGURE TASKS TEAMS: Calculate Teams to Delete"
+  ansible.builtin.set_fact:
+    awx_teams_to_delete: >-
+      {%- set all_teams = [] -%}
+      {%- for team in current_awx_teams -%}
+        {%- set identifier = team.name ~ '@' ~ team.summary_fields.organization.name -%}
+        {%- if identifier not in awx_teams_to_keep -%}
+          {%- set _ = all_teams.append({'name': team.name, 'organization': team.summary_fields.organization.name}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ all_teams }}
+
+- name: "AWX CONFIGURE TASKS TEAMS: Configure Teams"
+  awx.awx.team:
+    name: "{{ item.1.name }}"
+    description: "{{ item.1.description }}"
+    organization: "{{ item.0.name }}"
+    state: present
+  loop: "{{ awx_config.organizations | subelements('teams') }}"
+
+- name: Debug awx_teams_to_delete
+  ansible.builtin.debug:
+    var: awx_teams_to_delete
+    verbosity: 2
+
+- name: "AWX CONFIGURE TASKS TEAMS: Cleanup Teams"
+  awx.awx.team:
+    name: "{{ item.name }}"
+    organization: "{{ item.organization }}"
+    state: absent
+  loop: "{{ awx_teams_to_delete | from_yaml }}"
+  when: awx_teams_to_delete | length > 0

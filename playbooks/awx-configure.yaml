@@ -1,0 +1,45 @@
+---
+- name: Configure Ansible AWX
+  hosts: awx
+  environment:
+    CONTROLLER_HOST: "{{ awx_config.controller_host }}"
+    # CONTROLLER_USERNAME: "{{ awx_config.controller_username }}"
+    # CONTROLLER_PASSWORD: "{{ awx_config.controller_password }}"
+    CONTROLLER_USERNAME: "oauth2"
+    CONTROLLER_OAUTH_TOKEN: "{{ awx_config.controller_oauth_token }}"
+    CONTROLLER_VERIFY_SSL: "false"
+  tasks:
+    - name: Start playbook
+      ansible.builtin.debug:
+        msg: "This playbook will configure Ansible AWX"
+
+    - name: Create tower_cli.cfg as workaround for awx_config.controller_api lookup
+      ansible.builtin.copy:
+        content: |
+          host={{ awx_config.controller_host }}
+          #username={{ awx_config.controller_username }}
+          #password={{ awx_config.controller_password }}
+          username=oauth2
+          oauth_token={{ awx_config.controller_oauth_token }}
+          verify_ssl=false
+        dest: ../tower_cli.cfg
+        mode: "0666"
+      changed_when: false
+
+    - name: "AWX CONFIGURE TASKS: Credentials"
+      ansible.builtin.include_tasks: awx-configure-tasks/awx-configure-tasks-credentials.yaml
+
+    - name: "AWX CONFIGURE TASKS: Execution Environments"
+      ansible.builtin.include_tasks: awx-configure-tasks/awx-configure-tasks-execution-environments.yaml
+
+    - name: "AWX CONFIGURE TASKS: Organizations"
+      ansible.builtin.include_tasks: awx-configure-tasks/awx-configure-tasks-organizations.yaml
+
+    - name: "AWX CONFIGURE TASKS: Teams"
+      ansible.builtin.include_tasks: awx-configure-tasks/awx-configure-tasks-teams.yaml
+
+    - name: Cleanup tower_cli.cfg
+      ansible.builtin.file:
+        path: ../tower_cli.cfg
+        state: absent
+      changed_when: false

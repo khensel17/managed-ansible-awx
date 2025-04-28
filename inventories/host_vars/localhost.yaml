@@ -1,0 +1,63 @@
+# Organizations
+awx_config:
+  controller_host: "http://127.0.0.1:8052"
+  controller_username: "admin"
+  controller_password: !vault |
+    $ANSIBLE_VAULT;1.1;AES256
+    65393434346337376632663832366261346432386438626663373364326565333038323331343764
+    3736656339333933646334333236326430336633636663650a633565353737303039626135636430
+    35383733623533636239386633396661303566316536396661646639393963336136356134396133
+    6238306662343031620a313533393464396336396431616264353761343430333962666236306437
+    34646165613934313364336639613239333163316563643563343364373038353964363831323031
+    3461373061373236323462643534346333663735353765343337
+
+  organizations:
+    - name: organization1
+      description: "Organization 1"
+      # instance_groups: []
+      execution_environment: "custom-ee"
+      galaxy_credentials:
+        - Ansible Galaxy
+      teams:
+        - name: Operations
+          description: "Operations Team"
+        - name: Development
+          description: "Development Team"
+
+    - name: organization2
+      description: "Organization 2"
+      # instance_groups: []
+      execution_environment: "custom-ee"
+      # galaxy_credentials:
+        # - Ansible Galaxy
+      teams:
+        - name: Test
+          description: "Test Team"
+  extra_execution_environments:
+    - name: custom-ee
+      description: "Custom Execution Environment"
+      image: khensel/custom-ee:1.0.3
+      # credential: registry-credential
+      # organization: organization1
+      pull: missing
+
+  credentials:
+    - name: git-read-credential
+      description: "Git Read Credential"
+      credential_type: Source Control
+      # Only one option can be set under owner at the time.
+      owner:
+        # user: admin
+        # team: Development
+        organization: organization1
+      parameters:
+        username: oauth2
+        password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          63656666666361333164613164356630383238653235386365336663656663646232626132333965
+          6630363033333835646161653563363435636437623262390a626465356437396430633633623036
+          31616365313034383136326334633439306561643865613066366634643762376632313234396233
+          3936353030393436390a366633303637353538636163646632353862653164353435326163316339
+          37663231333963643333313461626236626636336433366634666339333130313938
+
+  config: []

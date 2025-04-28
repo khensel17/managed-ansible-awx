@@ -1,0 +1,123 @@
+---
+- name: Configure Inventories on Ansible AWX
+  hosts: awx
+  environment:
+    CONTROLLER_HOST: "{{ awx_config.controller_host }}"
+    CONTROLLER_USERNAME: "oauth2"
+    CONTROLLER_OAUTH_TOKEN: "{{ awx_config.controller_oauth_token }}"
+    CONTROLLER_VERIFY_SSL: "false"
+  tasks:
+    - name: Start playbook
+      ansible.builtin.debug:
+        msg: "This playbook will configure Inventories on Ansible AWX"
+        verbosity: 0
+
+    - name: Show ansible facts
+      ansible.builtin.debug:
+        var: ansible_facts
+        verbosity: 2
+
+    - name: Create tower_cli.cfg as workaround for awx_config.controller_api lookup
+      ansible.builtin.copy:
+        content: |
+          host={{ awx_config.controller_host }}
+          username=oauth2
+          oauth_token={{ awx_config.controller_oauth_token }}
+          verify_ssl=false
+        dest: ../tower_cli.cfg
+        mode: "0666"
+      changed_when: false
+
+    - name: "AWX: Ensure SCM credential exists"
+      ansible.builtin.set_fact:
+        awx_scm_credential: >-
+          {{ lookup('awx.awx.controller_api', 'credentials', query_params={"name": (project_scm_credential | default('git-read-credential'))}) }}
+      failed_when: awx_scm_credential | length == 0
+
+    - name: Create Project
+      awx.awx.project:
+        name: "{{ project_name }}"
+        description: "{{ project_description }}"
+        organization: "{{ project_organization_name }}"
+        scm_type: "git"
+        scm_url: "{{ project_scm_url }}"
+        credential: "{{ project_scm_credential | default('git-read-credential') }}"
+        state: present
+
+    - name: Create Inventory
+      awx.awx.inventory:
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        organization: "{{ project_organization_name }}"
+        state: present
+      loop: "{{ inventories }}"
+
+    - name: Create Inventory Source
+      awx.awx.inventory_source:
+        name: "{{ item.0.name }}_{{ item.1.name }}"
+        description: "Source for inventory {{ item.0.name }}: {{ item.1.name }}"
+        inventory: "{{ item.0.name }}"
+        organization: "{{ project_organization_name }}"
+        source: scm
+        source_project: "{{ project_name }}"
+        source_path: "{{ item.1.path }}"
+        credential: "{{ item.1.credential | default(omit) }}"
+        overwrite: true
+        overwrite_vars: true
+        update_on_launch: false
+        state: present
+      loop: "{{ inventories | subelements('sources') }}"
+
+    - name: "AWX: Get existing inventories sources"
+      ansible.builtin.set_fact:
+        awx_existing_inventory_sources: >-
+          {{ lookup('awx.awx.controller_api', 'inventory_sources', query_params={'inventory__name': item.name}, return_all=true) }}
+        inventory_sources_names: >-
+          {%- set names_output = [] -%}
+          {%- for source in item.sources -%}
+          {%- set _ = names_output.append(item.name + "_" + source.name) -%}
+          {%- endfor -%}
+          {{ names_output }}
+      loop: "{{ inventories }}"
+      register: awx_existing_inventories_results
+
+    - name: "AWX DEBUG: awx_existing_inventories"
+      ansible.builtin.debug:
+        var: awx_existing_inventories_results
+        verbosity: 2
+
+    - name: "AWX DEBUG: diff awx_existing_inventories"
+      ansible.builtin.debug:
+        msg: "{{ (item.ansible_facts.awx_existing_inventory_sources | map(attribute='name') | list) | difference(inventory_sources_names) }}"
+        verbosity: 2
+      loop: "{{ (awx_existing_inventories_results.results) }}"
+
+    - name: "AWX: Delete inventory sources that are not defined in config"
+      awx.awx.inventory_source:
+        name: "{{ item }}"
+        inventory: >-
+          {{
+            (awx_existing_inventories_results.results |
+              map(attribute='ansible_facts') |
+              map(attribute='awx_existing_inventory_sources') |
+              flatten |
+              selectattr('name', 'in', item)
+            )[0].inventory
+          }}
+        state: absent
+      loop: >-
+        {{
+          (
+            awx_existing_inventories_results.results |
+              map(attribute='ansible_facts') |
+              map(attribute='awx_existing_inventory_sources') |
+              flatten |
+              map(attribute='name')
+          ) | difference(inventory_sources_names)
+        }}
+
+    - name: Cleanup tower_cli.cfg
+      ansible.builtin.file:
+        path: ../tower_cli.cfg
+        state: absent
+      changed_when: false

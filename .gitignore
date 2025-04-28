@@ -1,0 +1,5 @@
+.venv
+playbooks/roles
+playbooks/collections
+.vscode
+.ansible
