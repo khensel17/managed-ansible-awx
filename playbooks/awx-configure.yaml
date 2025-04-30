@@ -26,6 +26,9 @@
         mode: "0666"
       changed_when: false
 
+    - name: "AWX CONFIGURE TASKS: Execution Environments"
+      ansible.builtin.include_tasks: awx-configure-tasks/awx-configure-tasks-execution-environments.yaml
+
     - name: "AWX CONFIGURE TASKS: Organizations"
       ansible.builtin.include_tasks: awx-configure-tasks/awx-configure-tasks-organizations.yaml
 
@@ -34,9 +37,6 @@
 
     - name: "AWX CONFIGURE TASKS: Credentials"
       ansible.builtin.include_tasks: awx-configure-tasks/awx-configure-tasks-credentials.yaml
-
-    - name: "AWX CONFIGURE TASKS: Execution Environments"
-      ansible.builtin.include_tasks: awx-configure-tasks/awx-configure-tasks-execution-environments.yaml
 
     - name: Cleanup tower_cli.cfg
       ansible.builtin.file:
