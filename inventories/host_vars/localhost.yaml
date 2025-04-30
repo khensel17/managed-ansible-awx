@@ -15,7 +15,7 @@ awx_config:
     - name: organization1
       description: "Organization 1"
       # instance_groups: []
-      execution_environment: "custom-ee"
+      execution_environment: custom-ee
       galaxy_credentials:
         - Ansible Galaxy
       teams:
@@ -27,12 +27,13 @@ awx_config:
     - name: organization2
       description: "Organization 2"
       # instance_groups: []
-      execution_environment: "custom-ee"
+      execution_environment: custom-ee
       # galaxy_credentials:
         # - Ansible Galaxy
       teams:
         - name: Test
           description: "Test Team"
+
   extra_execution_environments:
     - name: custom-ee
       description: "Custom Execution Environment"
