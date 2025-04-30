@@ -71,7 +71,7 @@
     - name: "AWX: Get existing inventories sources"
       ansible.builtin.set_fact:
         awx_existing_inventory_sources: >-
-          {{ lookup('awx.awx.controller_api', 'inventory_sources', query_params={'inventory__name': item.name}, return_all=true) }}
+          {{ lookup('awx.awx.controller_api', 'inventory_sources', query_params={'inventory__name': item.name}, return_all=true, wantlist=true) }}
         inventory_sources_names: >-
           {%- set names_output = [] -%}
           {%- for source in item.sources -%}
